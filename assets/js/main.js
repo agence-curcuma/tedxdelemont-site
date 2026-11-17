@@ -370,14 +370,55 @@ function initSubnav(){
   map.forEach((a,t)=>io.observe(t));
 }
 
-/* ---------- newsletter (à connecter) ---------- */
+/* ---------- newsletter (Infomaniak Newsletter) ---------- */
+/* Envoi en JSONP vers l'API Infomaniak, comme leur script officiel, sans quitter la page.
+   L'anti-robots Altcha est résolu juste avant l'envoi. */
 function initNewsletter(){
+  let n = 0;
   document.querySelectorAll("form[data-newsletter]").forEach(f=>{
-    f.addEventListener("submit",e=>{
-      if(f.getAttribute("action")) return;
+    const msg = f.parentElement.querySelector("[data-msg]");
+    const btn = f.querySelector("button[type=submit]");
+    const say = t => { if(msg) msg.textContent = t; };
+    f.addEventListener("submit", async e=>{
       e.preventDefault();
-      const msg = f.parentElement.querySelector("[data-msg]");
-      if(msg) msg.textContent = "Merci ! L'inscription sera active dès la connexion du service d'emailing.";
+      e.stopImmediatePropagation();
+      const action = f.getAttribute("action");
+      if(!action || (btn && btn.disabled)) return;
+      const email = f.querySelector("#nl-email");
+      if(email && !email.checkValidity()){ say("Merci d'indiquer une adresse e-mail valide."); email.focus(); return; }
+      if(btn) btn.disabled = true;
+      say("Inscription en cours…");
+      try{
+        const alt = f.querySelector("altcha-widget");
+        if(alt && !(f.querySelector("input[name=altcha]")||{}).value && typeof alt.verify === "function"){
+          await alt.verify();
+        }
+        const cb = "tedxNl" + Date.now() + (n++);
+        const params = new URLSearchParams(new FormData(f));
+        params.set("callback", cb);
+        const res = await new Promise((ok, ko)=>{
+          const s = document.createElement("script");
+          const t = setTimeout(()=>{ cleanup(); ko(new Error("timeout")); }, 15000);
+          function cleanup(){ clearTimeout(t); delete window[cb]; s.remove(); }
+          window[cb] = r => { cleanup(); ok(r); };
+          s.onerror = ()=>{ cleanup(); ko(new Error("network")); };
+          s.src = action + (action.includes("?") ? "&" : "?") + params.toString();
+          document.head.appendChild(s);
+        });
+        if(res && res.err && Object.keys(res.err).length){
+          const vals = Object.values(res.err);
+          say(vals.includes("altcha") ? "La vérification anti-robots a échoué, merci de réessayer." : "Cette adresse n'a pas pu être enregistrée : " + vals.join(", "));
+          if(alt && typeof alt.reset === "function") alt.reset();
+        }else{
+          f.reset();
+          if(alt && typeof alt.reset === "function") alt.reset();
+          say("Merci ! Dernière étape : cliquez sur le lien de confirmation que nous venons de vous envoyer par e-mail (pensez à vérifier vos spams).");
+        }
+      }catch(err){
+        say("Oups, l'inscription n'a pas pu aboutir. Réessayez dans un instant ou écrivez-nous à hello@tedxdelemont.com.");
+      }finally{
+        if(btn) btn.disabled = false;
+      }
     });
   });
 }
